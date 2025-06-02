@@ -1,0 +1,19 @@
+# === General Configuration ===
+use_ai: false
+ai_provider: openai
+generate_test_cases: false
+# === AI Provider Settings ===
+openai:
+  model: gpt-4
+
+gemini:
+  model: gemini-pro
+  api_endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent
+
+# === Output Directories ===
+output_dir: output/mappings
+test_case_dir: output/test_cases
+
+# === Retry Settings ===
+retry_attempts: 3
+retry_delay_seconds: 2
