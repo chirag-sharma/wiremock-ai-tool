@@ -28,7 +28,7 @@ def load_and_parse_swagger(file_path):
 
     logging.info(f"📘 Detected OpenAPI version: {version}")
 
-    # ✅ Build nested structure: { path: { method: snippet } }
+    # Build nested structure: { path: { method: snippet } }
     endpoints = {}
     for path, path_item in paths.items():
         methods_dict = {}

@@ -1,47 +1,62 @@
-import os
 import logging
-from openpyxl import Workbook
+import os
+import pandas as pd
 
-OUTPUT_DIR = "output/test_cases"
+from ai_handler import get_llm_response  # ai_handler is in root, not in utils
 
-def generate_test_cases(endpoint: str, method: str, responses: list):
-    """
-    Generates Excel test cases for an endpoint and saves them under output/test_cases.
-
-    Args:
-        endpoint (str): The API path (e.g., "/pet/{id}").
-        method (str): HTTP method (e.g., "get", "post").
-        responses (list): A list of WireMock-style response dicts (LLM or stub generated).
-    """
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    safe_path = endpoint.strip("/").replace("/", "_").replace("{", "").replace("}", "")
-    file_name = f"{method.upper()}_{safe_path or 'root'}.xlsx"
-    file_path = os.path.join(OUTPUT_DIR, file_name)
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Test Cases"
-
-    # Header
-    ws.append(["Test Case ID", "Endpoint", "Method", "Expected Status", "Expected Body Preview", "Headers"])
-
-    for idx, resp in enumerate(responses, 1):
-        status = resp.get("response", {}).get("status", "")
-        body = resp.get("response", {}).get("body", "")
-        headers = resp.get("response", {}).get("headers", {})
-
-        ws.append([
-            f"TC_{idx:03}",
-            endpoint,
-            method.upper(),
-            status,
-            str(body)[:100].replace("\n", " "),  # Trim + flatten for Excel preview
-            ", ".join(f"{k}: {v}" for k, v in headers.items())
-        ])
-
+# ===============================
+# 🧪 Test Case Generation Module
+# ===============================
+def generate_test_cases(endpoint, method, responses, config, output_dir):
     try:
-        wb.save(file_path)
-        logging.info(f"📄 Test cases saved: {file_path}")
+        logging.info("🧪 Starting test case generation...")
+
+        test_cases = []
+        use_ai = config.get("use_ai", False)
+
+        for idx, (status_code, response_info) in enumerate(responses.items(), start=1):
+            # Basic values
+            test_case_id = f"TC_{str(idx).zfill(3)}"
+            expected_status = int(status_code)
+            expected_body = response_info.get("body", "") or "{}"
+
+            # Determine content-type header (if available)
+            headers = response_info.get("headers", {})
+            headers_str = ", ".join([f"{k}: {v}" for k, v in headers.items()])
+
+            # ✨ Description logic
+            if use_ai:
+                try:
+                    prompt = (
+                        f"Write a concise test case description for an API request to {method.upper()} {endpoint} "
+                        f"that expects HTTP {expected_status}."
+                    )
+                    description = get_llm_response(prompt, config).strip()
+                except Exception as e:
+                    logging.warning(f"⚠️ AI description fallback: {e}")
+                    description = f"Validate {method.upper()} {endpoint} returns {expected_status}"
+            else:
+                # Fallback if AI is disabled
+                description = f"Validate {method.upper()} {endpoint} returns {expected_status}"
+
+            # Construct test case row
+            test_cases.append({
+                "Test Case ID": test_case_id,
+                "Endpoint": endpoint,
+                "Method": method.upper(),
+                "Expected Status": expected_status,
+                "Expected Body Preview": expected_body,
+                "Headers": headers_str,
+                "Test Case Description": description
+            })
+
+        # Write to Excel
+        df = pd.DataFrame(test_cases)
+        os.makedirs(output_dir, exist_ok=True)
+        file_path = os.path.join(output_dir, f"{method.upper()}_{endpoint.strip('/').replace('/', '_')}_test_cases.xlsx")
+        df.to_excel(file_path, index=False)
+
+        logging.info(f"✅ Test cases saved: {file_path}")
+
     except Exception as e:
-        logging.error(f"❌ Failed to save Excel file: {e}")
-        raise
+        logging.error(f"❌ Failed to process {method.upper()} {endpoint}: {e}")

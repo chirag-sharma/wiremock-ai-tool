@@ -2,6 +2,7 @@ import time
 import random
 import logging
 import yaml
+import functools  # ✅ ADD THIS
 
 # Load API keys from config/keys.yaml
 def load_api_keys(provider):
@@ -19,10 +20,11 @@ def retry_with_key_rotation(provider, config):
         raise ValueError(f"No API keys found for provider '{provider}'")
 
     def decorator(api_function):
+        @functools.wraps(api_function)  # ✅ IMPORTANT: preserve original metadata
         def wrapper(*args, **kwargs):
             for attempt in range(1, max_attempts + 1):
                 current_key = random.choice(api_keys)
-                kwargs["api_key"] = current_key  # Inject the selected key
+                kwargs["api_key"] = current_key  # Inject key
 
                 try:
                     return api_function(*args, **kwargs)

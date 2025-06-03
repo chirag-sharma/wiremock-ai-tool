@@ -1,10 +1,10 @@
 # === General Configuration ===
 use_ai: false
 ai_provider: openai
-generate_test_cases: false
+generate_test_cases: true
 # === AI Provider Settings ===
 openai:
-  model: gpt-4
+  model: gpt-3.5-turbo
 
 gemini:
   model: gemini-pro
