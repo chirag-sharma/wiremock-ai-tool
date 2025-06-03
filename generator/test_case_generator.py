@@ -1,91 +1,90 @@
 import os
 import logging
-from openpyxl import Workbook
-from openpyxl.utils import get_column_letter
+import openpyxl
+from openpyxl.styles import Font
+
+from ai_handler import get_llm_response
 
 
 def generate_test_cases(endpoint, method, mappings, config, output_dir):
     """
-    Generates test cases based on WireMock mappings and writes them to an Excel (.xlsx) file.
+    Generates test cases in Excel format based on WireMock mappings.
 
     Args:
-        endpoint (str): The API path (e.g., "/pet").
-        method (str): The HTTP method (e.g., "POST").
-        mappings (list): List of WireMock mapping dictionaries.
-        config (dict): Loaded configuration dictionary from config.yaml.
-        output_dir (str): Directory path where the Excel file will be saved.
+        endpoint (str): API path.
+        method (str): HTTP method.
+        mappings (list): List of WireMock mappings.
+        config (dict): Configuration settings.
+        output_dir (str): Directory to save the Excel file.
     """
-    try:
-        logging.info("🧪 Starting test case generation...")
+    logging.info("🧪 Starting test case generation...")
 
-        if not isinstance(mappings, list):
-            logging.error(f"❌ Expected mappings to be a list, but got {type(mappings).__name__}")
-            return
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
 
-        os.makedirs(output_dir, exist_ok=True)
+    # Prepare Excel workbook
+    wb = openpyxl.Workbook()
+    sheet = wb.active
+    sheet.title = "Test Cases"
 
-        # Create a safe filename
-        safe_path = endpoint.strip("/").replace("/", "_").replace("{", "").replace("}", "")
-        filename = f"TESTCASES_{method.upper()}_{safe_path or 'root'}.xlsx"
-        file_path = os.path.join(output_dir, filename)
+    headers = ["Endpoint", "Method", "Expected Status", "Expected Headers", "Expected Body", "Test Case Description"]
+    sheet.append(headers)
+    for col in sheet.iter_cols(min_row=1, max_row=1, min_col=1, max_col=len(headers)):
+        for cell in col:
+            cell.font = Font(bold=True)
 
-        # Create Excel workbook and sheet
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "TestCases"
+    use_ai = config.get("use_ai", False)
+    ai_provider = config.get("ai_provider", "openai").lower()
 
-        # Write header row
-        headers = [
-            "Test Case Name",
-            "Method",
-            "Endpoint",
-            "Expected Status",
-            "Expected Body",
-            "Expected Headers",
-            "Test Case Description"
-        ]
-        ws.append(headers)
+    for mapping in mappings:
+        try:
+            req = mapping.get("request", {})
+            res = mapping.get("response", {})
+            status = res.get("status")
+            headers = res.get("headers", {})
+            body = res.get("body", "")
 
-        # Write each test case
-        for idx, mapping in enumerate(mappings, 1):
-            request = mapping.get("request", {})
-            response = mapping.get("response", {})
+            if not status:
+                logging.warning("⚠️ Skipping mapping with missing status.")
+                continue
 
-            status = response.get("status", "")
-            body = response.get("body", "")
-            headers_dict = response.get("headers", {})
-
-            test_case_name = f"TC_{method.upper()}_{idx}"
-            description = f"Test that {method.upper()} {endpoint} returns {status}"
-
-            row = [
-                test_case_name,
-                method.upper(),
-                endpoint,
-                status,
-                str(body),
-                str(headers_dict),
-                description
-            ]
-            ws.append(row)
-
-        # Auto-resize columns
-        for col in ws.columns:
-            max_length = 0
-            column_letter = get_column_letter(col[0].column)
-            for cell in col:
+            # 📄 Build test case description
+            if use_ai:
                 try:
-                    cell_length = len(str(cell.value))
-                    if cell_length > max_length:
-                        max_length = cell_length
-                except:
-                    pass
-            adjusted_width = max_length + 2
-            ws.column_dimensions[column_letter].width = adjusted_width
+                    prompt = f"""You're writing test cases for an API mocking tool.
 
-        # Save Excel file
-        wb.save(file_path)
-        logging.info(f"✅ Test cases written to Excel: {file_path}")
+API Endpoint: {endpoint}
+HTTP Method: {method.upper()}
+Expected Status Code: {status}
+Expected Headers: {headers}
+Expected Response Body: {body}
 
-    except Exception as e:
-        logging.error(f"❌ Failed to generate Excel test cases for {method.upper()} {endpoint}: {e}")
+Write a clear, concise functional test case description (one line) for validating this scenario."""
+                    description = get_llm_response(prompt, config).strip()
+                    logging.info(f"🧠 AI-generated description for {method.upper()} {endpoint} [{status}]")
+                except Exception as e:
+                    logging.warning(f"⚠️ Failed to get AI-generated description. Falling back. Error: {e}")
+                    description = f"Verify {method.upper()} {endpoint} returns status {status}."
+            else:
+                description = f"Verify {method.upper()} {endpoint} returns status {status} with correct headers and body."
+
+            # 📤 Append row
+            sheet.append([
+                endpoint,
+                method.upper(),
+                status,
+                str(headers),
+                str(body),
+                description
+            ])
+
+        except Exception as e:
+            logging.error(f"❌ Failed to process mapping: {e}")
+            continue
+
+    # Save workbook
+    safe_name = endpoint.strip("/").replace("/", "_").replace("{", "").replace("}", "")
+    excel_file = f"{method.upper()}_{safe_name or 'root'}_test_cases.xlsx"
+    output_path = os.path.join(output_dir, excel_file)
+    wb.save(output_path)
+    logging.info(f"📁 Test cases saved: {output_path}")
