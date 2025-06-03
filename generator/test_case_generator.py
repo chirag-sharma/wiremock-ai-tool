@@ -1,62 +1,91 @@
-import logging
 import os
-import pandas as pd
+import logging
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 
-from ai_handler import get_llm_response  # ai_handler is in root, not in utils
 
-# ===============================
-# 🧪 Test Case Generation Module
-# ===============================
-def generate_test_cases(endpoint, method, responses, config, output_dir):
+def generate_test_cases(endpoint, method, mappings, config, output_dir):
+    """
+    Generates test cases based on WireMock mappings and writes them to an Excel (.xlsx) file.
+
+    Args:
+        endpoint (str): The API path (e.g., "/pet").
+        method (str): The HTTP method (e.g., "POST").
+        mappings (list): List of WireMock mapping dictionaries.
+        config (dict): Loaded configuration dictionary from config.yaml.
+        output_dir (str): Directory path where the Excel file will be saved.
+    """
     try:
         logging.info("🧪 Starting test case generation...")
 
-        test_cases = []
-        use_ai = config.get("use_ai", False)
+        if not isinstance(mappings, list):
+            logging.error(f"❌ Expected mappings to be a list, but got {type(mappings).__name__}")
+            return
 
-        for idx, (status_code, response_info) in enumerate(responses.items(), start=1):
-            # Basic values
-            test_case_id = f"TC_{str(idx).zfill(3)}"
-            expected_status = int(status_code)
-            expected_body = response_info.get("body", "") or "{}"
-
-            # Determine content-type header (if available)
-            headers = response_info.get("headers", {})
-            headers_str = ", ".join([f"{k}: {v}" for k, v in headers.items()])
-
-            # ✨ Description logic
-            if use_ai:
-                try:
-                    prompt = (
-                        f"Write a concise test case description for an API request to {method.upper()} {endpoint} "
-                        f"that expects HTTP {expected_status}."
-                    )
-                    description = get_llm_response(prompt, config).strip()
-                except Exception as e:
-                    logging.warning(f"⚠️ AI description fallback: {e}")
-                    description = f"Validate {method.upper()} {endpoint} returns {expected_status}"
-            else:
-                # Fallback if AI is disabled
-                description = f"Validate {method.upper()} {endpoint} returns {expected_status}"
-
-            # Construct test case row
-            test_cases.append({
-                "Test Case ID": test_case_id,
-                "Endpoint": endpoint,
-                "Method": method.upper(),
-                "Expected Status": expected_status,
-                "Expected Body Preview": expected_body,
-                "Headers": headers_str,
-                "Test Case Description": description
-            })
-
-        # Write to Excel
-        df = pd.DataFrame(test_cases)
         os.makedirs(output_dir, exist_ok=True)
-        file_path = os.path.join(output_dir, f"{method.upper()}_{endpoint.strip('/').replace('/', '_')}_test_cases.xlsx")
-        df.to_excel(file_path, index=False)
 
-        logging.info(f"✅ Test cases saved: {file_path}")
+        # Create a safe filename
+        safe_path = endpoint.strip("/").replace("/", "_").replace("{", "").replace("}", "")
+        filename = f"TESTCASES_{method.upper()}_{safe_path or 'root'}.xlsx"
+        file_path = os.path.join(output_dir, filename)
+
+        # Create Excel workbook and sheet
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "TestCases"
+
+        # Write header row
+        headers = [
+            "Test Case Name",
+            "Method",
+            "Endpoint",
+            "Expected Status",
+            "Expected Body",
+            "Expected Headers",
+            "Test Case Description"
+        ]
+        ws.append(headers)
+
+        # Write each test case
+        for idx, mapping in enumerate(mappings, 1):
+            request = mapping.get("request", {})
+            response = mapping.get("response", {})
+
+            status = response.get("status", "")
+            body = response.get("body", "")
+            headers_dict = response.get("headers", {})
+
+            test_case_name = f"TC_{method.upper()}_{idx}"
+            description = f"Test that {method.upper()} {endpoint} returns {status}"
+
+            row = [
+                test_case_name,
+                method.upper(),
+                endpoint,
+                status,
+                str(body),
+                str(headers_dict),
+                description
+            ]
+            ws.append(row)
+
+        # Auto-resize columns
+        for col in ws.columns:
+            max_length = 0
+            column_letter = get_column_letter(col[0].column)
+            for cell in col:
+                try:
+                    cell_length = len(str(cell.value))
+                    if cell_length > max_length:
+                        max_length = cell_length
+                except:
+                    pass
+            adjusted_width = max_length + 2
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+        # Save Excel file
+        wb.save(file_path)
+        logging.info(f"✅ Test cases written to Excel: {file_path}")
 
     except Exception as e:
-        logging.error(f"❌ Failed to process {method.upper()} {endpoint}: {e}")
+        logging.error(f"❌ Failed to generate Excel test cases for {method.upper()} {endpoint}: {e}")

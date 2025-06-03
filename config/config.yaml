@@ -1,5 +1,5 @@
 # === General Configuration ===
-use_ai: false
+use_ai: true
 ai_provider: openai
 generate_test_cases: true
 # === AI Provider Settings ===
