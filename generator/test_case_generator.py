@@ -1,90 +1,90 @@
 import os
+import json
 import logging
-import openpyxl
-from openpyxl.styles import Font
-
+import pandas as pd
 from ai_handler import get_llm_response
-
 
 def generate_test_cases(endpoint, method, mappings, config, output_dir):
     """
     Generates test cases in Excel format based on WireMock mappings.
 
     Args:
-        endpoint (str): API path.
-        method (str): HTTP method.
-        mappings (list): List of WireMock mappings.
-        config (dict): Configuration settings.
-        output_dir (str): Directory to save the Excel file.
+        endpoint (str): API path (e.g., /pet)
+        method (str): HTTP method (e.g., POST)
+        mappings (list): List of WireMock mapping dictionaries
+        config (dict): Loaded config.yaml content
+        output_dir (str): Directory path where Excel file will be saved
     """
+    os.makedirs(output_dir, exist_ok=True)
+    test_cases = []
+    use_ai = config.get("use_ai", False)
+
     logging.info("🧪 Starting test case generation...")
 
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Prepare Excel workbook
-    wb = openpyxl.Workbook()
-    sheet = wb.active
-    sheet.title = "Test Cases"
-
-    headers = ["Endpoint", "Method", "Expected Status", "Expected Headers", "Expected Body", "Test Case Description"]
-    sheet.append(headers)
-    for col in sheet.iter_cols(min_row=1, max_row=1, min_col=1, max_col=len(headers)):
-        for cell in col:
-            cell.font = Font(bold=True)
-
-    use_ai = config.get("use_ai", False)
-    ai_provider = config.get("ai_provider", "openai").lower()
-
-    for mapping in mappings:
+    for i, mapping in enumerate(mappings, start=1):
         try:
-            req = mapping.get("request", {})
-            res = mapping.get("response", {})
-            status = res.get("status")
-            headers = res.get("headers", {})
-            body = res.get("body", "")
+            request = mapping.get("request", {})
+            response = mapping.get("response", {})
+            status = response.get("status", "N/A")
+            headers = response.get("headers", {})
+            body = response.get("body", {})
 
-            if not status:
-                logging.warning("⚠️ Skipping mapping with missing status.")
-                continue
+            # Convert dicts to strings for Excel
+            headers_str = json.dumps(headers, indent=2) if isinstance(headers, dict) else str(headers)
+            body_str = json.dumps(body, indent=2) if isinstance(body, dict) else str(body)
 
-            # 📄 Build test case description
+            # ✨ AI-generated description
             if use_ai:
                 try:
-                    prompt = f"""You're writing test cases for an API mocking tool.
+                    prompt = f"""
+You are a professional QA engineer. Based on the API details below, write a concise and meaningful one-line test case description:
 
-API Endpoint: {endpoint}
+Endpoint: {endpoint}
 HTTP Method: {method.upper()}
 Expected Status Code: {status}
 Expected Headers: {headers}
 Expected Response Body: {body}
 
-Write a clear, concise functional test case description (one line) for validating this scenario."""
+Rules:
+- Be specific (e.g., "Verify successful pet creation")
+- Include conditions or goals (e.g., "when valid input is provided")
+- Do not include filler like "This test case is..."
+- Write as a single sentence.
+
+Only return the test case description.
+"""
                     description = get_llm_response(prompt, config).strip()
-                    logging.info(f"🧠 AI-generated description for {method.upper()} {endpoint} [{status}]")
+                    logging.info(f"🧠 AI description created for {method.upper()} {endpoint} [{status}]")
                 except Exception as e:
-                    logging.warning(f"⚠️ Failed to get AI-generated description. Falling back. Error: {e}")
+                    logging.warning(f"⚠️ AI description failed, falling back. Error: {e}")
                     description = f"Verify {method.upper()} {endpoint} returns status {status}."
             else:
-                description = f"Verify {method.upper()} {endpoint} returns status {status} with correct headers and body."
+                description = f"Verify {method.upper()} {endpoint} returns status {status} with correct response."
 
-            # 📤 Append row
-            sheet.append([
-                endpoint,
-                method.upper(),
-                status,
-                str(headers),
-                str(body),
-                description
-            ])
+            test_cases.append({
+                "Test Case ID": f"TC_{method.upper()}_{i}",
+                "Endpoint": endpoint,
+                "Method": method.upper(),
+                "Expected Status": status,
+                "Expected Headers": headers_str,
+                "Expected Body": body_str,
+                "Test Case Description": description
+            })
 
         except Exception as e:
-            logging.error(f"❌ Failed to process mapping: {e}")
-            continue
+            logging.error(f"❌ Failed to process test case #{i} for {method.upper()} {endpoint}: {e}")
 
-    # Save workbook
-    safe_name = endpoint.strip("/").replace("/", "_").replace("{", "").replace("}", "")
-    excel_file = f"{method.upper()}_{safe_name or 'root'}_test_cases.xlsx"
-    output_path = os.path.join(output_dir, excel_file)
-    wb.save(output_path)
-    logging.info(f"📁 Test cases saved: {output_path}")
+    # ✅ Export to Excel
+    if test_cases:
+        safe_path = endpoint.strip("/").replace("/", "_").replace("{", "").replace("}", "")
+        file_name = f"{method.upper()}_{safe_path or 'root'}_test_cases.xlsx"
+        output_path = os.path.join(output_dir, file_name)
+
+        try:
+            df = pd.DataFrame(test_cases)
+            df.to_excel(output_path, index=False)
+            logging.info(f"📄 Test cases written to: {output_path}")
+        except Exception as e:
+            logging.error(f"❌ Failed to write Excel file: {e}")
+    else:
+        logging.warning(f"⚠️ No test cases generated for {method.upper()} {endpoint}")
