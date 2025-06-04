@@ -10,6 +10,11 @@ gemini:
   model: gemini-pro
   api_endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent
 
+org_llm:
+  model: gpt-4o
+  api_endpoint: api_name
+  temperature: 0.5
+
 # === Output Directories ===
 output_dir: output/mappings
 test_case_dir: output/test_cases
